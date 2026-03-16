@@ -1,0 +1,17 @@
+export const theme = {
+  background: '#F6F1E6',
+  surface: '#FFFDFC',
+  surfaceMuted: '#F0E9DA',
+  forest: '#163728',
+  moss: '#2F6045',
+  sage: '#7EA17E',
+  mint: '#DDE7D7',
+  sand: '#D3C5AE',
+  gold: '#BE8A3A',
+  coral: '#D86F4A',
+  sky: '#8AAEB8',
+  ink: '#1F2A22',
+  textMuted: '#66786A',
+  white: '#FFFFFF',
+  shadow: 'rgba(22, 55, 40, 0.08)',
+};
