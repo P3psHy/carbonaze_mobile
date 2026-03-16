@@ -70,19 +70,15 @@ const T = {
   colors: ['#14532D', '#0F766E', '#CA8A04', '#B45309', '#155E75'],
 };
 
-const DEFAULT_PAYLOAD: Payload = {
-  siteName: 'Carbonaze Rive Gauche',
-  city: 'Paris',
-  energyMwh: 1840,
-  gasMwh: 620,
-  employees: 920,
-  parkingSpaces: 142,
-  computers: 1037,
-  materials: [
-    { id: 'm1', name: 'Béton bas carbone', quantity: 320 },
-    { id: 'm2', name: 'Acier', quantity: 85 },
-    { id: 'm3', name: 'Verre', quantity: 40 },
-  ],
+const EMPTY_PAYLOAD: Payload = {
+  siteName: '',
+  city: '',
+  energyMwh: 0,
+  gasMwh: 0,
+  employees: 0,
+  parkingSpaces: 0,
+  computers: 0,
+  materials: [{ id: 'm1', name: '', quantity: 0 }],
 };
 
 const n1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
@@ -206,9 +202,9 @@ function Donut({ categories, total }: { categories: Category[]; total: number })
 
 export default function App() {
   const [page, setPage] = useState<Page>('home');
-  const [payload, setPayload] = useState(DEFAULT_PAYLOAD);
-  const [draft, setDraft] = useState(DEFAULT_PAYLOAD);
-  const [result, setResult] = useState<Result>(() => calculate(DEFAULT_PAYLOAD));
+  const [payload, setPayload] = useState(EMPTY_PAYLOAD);
+  const [draft, setDraft] = useState(EMPTY_PAYLOAD);
+  const [result, setResult] = useState<Result>(() => calculate(EMPTY_PAYLOAD));
   const [showModal, setShowModal] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -301,13 +297,11 @@ export default function App() {
             <View style={s.logo}><View style={s.l1} /><View style={s.l2} /><View style={s.l3} /></View>
             <View style={s.brandBlock}>
               <Text style={s.brand}>Carbonaze</Text>
-              <Text style={s.muted}>Plateforme de calcul et d'analyse des émissions CO2</Text>
             </View>
           </View>
           <View style={s.navRow}>
             <Pressable style={[s.navPill, page === 'home' ? s.navPillActive : null]} onPress={() => setPage('home')}><Text style={s.navText}>Home</Text></Pressable>
             <Pressable style={[s.navPill, page === 'calculator' ? s.navPillActive : null]} onPress={openCalculator}><Text style={s.navText}>Calcul</Text></Pressable>
-            <View style={s.status}><View style={s.dot} /><Text style={s.statusText}>Analyse instantanée</Text></View>
           </View>
         </View>
       </View>
@@ -430,17 +424,17 @@ export default function App() {
 
               <View style={s.formGrid}>
                 {[
-                  { label: 'Nom du site', value: draft.siteName, onChange: (v: string) => setText('siteName', v), placeholder: 'Carbonaze Rive Gauche', numeric: false, error: !draft.siteName.trim(), full: false },
-                  { label: 'Ville', value: draft.city, onChange: (v: string) => setText('city', v), placeholder: 'Paris', numeric: false, error: !draft.city.trim(), full: false },
-                  { label: 'Consommation électrique (MWh/an)', value: String(draft.energyMwh), onChange: (v: string) => setNum('energyMwh', v), placeholder: '1840', numeric: true, error: false, full: false },
-                  { label: 'Consommation de gaz (MWh/an)', value: String(draft.gasMwh), onChange: (v: string) => setNum('gasMwh', v), placeholder: '620', numeric: true, error: false, full: false },
-                  { label: "Nombre d'employés", value: String(draft.employees), onChange: (v: string) => setNum('employees', v), placeholder: '920', numeric: true, error: draft.employees < 1, full: false },
-                  { label: 'Places de parking', value: String(draft.parkingSpaces), onChange: (v: string) => setNum('parkingSpaces', v), placeholder: '142', numeric: true, error: false, full: false },
-                  { label: "Nombre d'ordinateurs", value: String(draft.computers), onChange: (v: string) => setNum('computers', v), placeholder: '1037', numeric: true, error: false, full: true },
+                  { label: 'Nom du site', value: draft.siteName, onChange: (v: string) => setText('siteName', v), numeric: false, error: !draft.siteName.trim(), full: false },
+                  { label: 'Ville', value: draft.city, onChange: (v: string) => setText('city', v), numeric: false, error: !draft.city.trim(), full: false },
+                  { label: 'Consommation électrique (MWh/an)', value: draft.energyMwh ? String(draft.energyMwh) : '', onChange: (v: string) => setNum('energyMwh', v), numeric: true, error: false, full: false },
+                  { label: 'Consommation de gaz (MWh/an)', value: draft.gasMwh ? String(draft.gasMwh) : '', onChange: (v: string) => setNum('gasMwh', v), numeric: true, error: false, full: false },
+                  { label: "Nombre d'employés", value: draft.employees ? String(draft.employees) : '', onChange: (v: string) => setNum('employees', v), numeric: true, error: draft.employees < 1, full: false },
+                  { label: 'Places de parking', value: draft.parkingSpaces ? String(draft.parkingSpaces) : '', onChange: (v: string) => setNum('parkingSpaces', v), numeric: true, error: false, full: false },
+                  { label: "Nombre d'ordinateurs", value: draft.computers ? String(draft.computers) : '', onChange: (v: string) => setNum('computers', v), numeric: true, error: false, full: true },
                 ].map((field) => (
                   <View key={field.label} style={[s.field, field.full ? s.full : null]}>
                     <Text style={s.label}>{field.label}</Text>
-                    <TextInput value={field.value} onChangeText={field.onChange} placeholder={field.placeholder} placeholderTextColor={T.muted} keyboardType={field.numeric ? 'numeric' : 'default'} style={[s.input, submitted && field.error ? s.error : null]} />
+                    <TextInput value={field.value} onChangeText={field.onChange} keyboardType={field.numeric ? 'numeric' : 'default'} style={[s.input, submitted && field.error ? s.error : null]} />
                   </View>
                 ))}
               </View>
@@ -452,8 +446,8 @@ export default function App() {
                 </View>
                 {draft.materials.map((m, i) => (
                   <View key={m.id} style={s.materialCard}>
-                    <View style={s.field}><Text style={s.label}>Matériau</Text><TextInput value={m.name} onChangeText={(v) => setMaterial(i, 'name', v)} placeholder="Béton, acier, bois..." placeholderTextColor={T.muted} style={[s.input, submitted && !m.name.trim() ? s.error : null]} /></View>
-                    <View style={s.field}><Text style={s.label}>Quantité</Text><TextInput value={m.quantity ? String(m.quantity) : ''} onChangeText={(v) => setMaterial(i, 'quantity', v)} keyboardType="numeric" placeholder="0" placeholderTextColor={T.muted} style={[s.input, submitted && m.quantity <= 0 ? s.error : null]} /></View>
+                    <View style={s.field}><Text style={s.label}>Matériau</Text><TextInput value={m.name} onChangeText={(v) => setMaterial(i, 'name', v)} style={[s.input, submitted && !m.name.trim() ? s.error : null]} /></View>
+                    <View style={s.field}><Text style={s.label}>Quantité</Text><TextInput value={m.quantity ? String(m.quantity) : ''} onChangeText={(v) => setMaterial(i, 'quantity', v)} keyboardType="numeric" style={[s.input, submitted && m.quantity <= 0 ? s.error : null]} /></View>
                     <Pressable disabled={draft.materials.length === 1} style={[s.secondary, draft.materials.length === 1 ? s.disabled : null]} onPress={() => setDraft((p) => ({ ...p, materials: p.materials.length === 1 ? p.materials : p.materials.filter((_, index) => index !== i) }))}><Text style={s.secondaryText}>Supprimer</Text></Pressable>
                   </View>
                 ))}
@@ -496,9 +490,6 @@ const s = StyleSheet.create({
   navPill: { borderWidth: 1, borderColor: T.lineStrong, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: 'rgba(255,255,255,0.72)', maxWidth: '100%' },
   navPillActive: { backgroundColor: 'rgba(19,92,82,0.08)' },
   navText: { color: T.ink, fontWeight: '700', fontSize: 13 },
-  status: { flexDirection: 'row', gap: 8, alignItems: 'center', borderWidth: 1, borderColor: T.lineStrong, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: 'rgba(255,255,255,0.72)', maxWidth: '100%', flexShrink: 1 },
-  dot: { width: 8, height: 8, borderRadius: 99, backgroundColor: T.mint },
-  statusText: { color: T.ink, fontWeight: '600', fontSize: 13, flexShrink: 1 },
   heroPanel: { gap: 14 },
   eyebrow: { color: T.moss, fontSize: 11, textTransform: 'uppercase', letterSpacing: 3, fontWeight: '700' },
   hero: { color: T.ink, fontSize: 38, lineHeight: 40, fontWeight: '700', marginTop: 10 },
