@@ -25,19 +25,25 @@ import {
   type SiteMaterialInput,
 } from './src/siteImpact';
 import {
-  createSociety,
   deleteBilan,
+  getAuthSession,
   getBilanById,
   getBilans,
   getMaterials,
+  getSiteComparisons,
+  loginUser,
+  logoutUser,
+  registerUser,
   saveCalculation,
   saveMaterials,
+  type AuthSession,
   type ApiBilanResponse,
   type ApiMaterialResponse,
+  type ApiSiteComparisonResponse,
 } from './src/services/carbonazeApi';
 import { environment } from './src/environment/environment';
 
-type Page = 'home' | 'calculator';
+type Page = 'home' | 'calculator' | 'comparison';
 
 const COLORS = {
   bg: '#F4F0E5',
@@ -96,6 +102,20 @@ const formatHistoryDate = (value?: string) => {
   }
 
   return parsed.toLocaleDateString('fr-FR');
+};
+
+const sortComparisonSitesByEmission = (
+  left: ApiSiteComparisonResponse,
+  right: ApiSiteComparisonResponse,
+) => {
+  const leftTotal = typeof left.latestTotalCo2 === 'number' ? left.latestTotalCo2 : -1;
+  const rightTotal = typeof right.latestTotalCo2 === 'number' ? right.latestTotalCo2 : -1;
+
+  if (rightTotal !== leftTotal) {
+    return rightTotal - leftTotal;
+  }
+
+  return left.name.localeCompare(right.name, 'fr');
 };
 
 const isOnlineState = (state: Network.NetworkState) => {
@@ -175,6 +195,13 @@ function Metric({
 export default function App() {
   const calculatorScrollRef = useRef<ScrollView | null>(null);
   const materialInputOffsets = useRef<Record<string, number>>({});
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() => getAuthSession());
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [authMail, setAuthMail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authSocietyName, setAuthSocietyName] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [page, setPage] = useState<Page>('home');
   const [draft, setDraft] = useState<SiteInputPayload>(EMPTY_PAYLOAD);
   const [payload, setPayload] = useState<SiteInputPayload>(EMPTY_PAYLOAD);
@@ -205,7 +232,6 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [societyId, setSocietyId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyItems, setHistoryItems] = useState<ApiBilanResponse[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
@@ -213,6 +239,10 @@ export default function App() {
   const [historyFeedback, setHistoryFeedback] = useState<string | null>(null);
   const [deletingBilanId, setDeletingBilanId] = useState<number | null>(null);
   const [openingBilanId, setOpeningBilanId] = useState<number | null>(null);
+  const [comparisonSites, setComparisonSites] = useState<ApiSiteComparisonResponse[]>([]);
+  const [isComparisonLoading, setIsComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [comparisonFeedback, setComparisonFeedback] = useState<string | null>(null);
 
   const catalog = useMemo(() => normalizeConfiguredMaterials(configuredMaterials), [configuredMaterials]);
   const filteredCatalog = useMemo(() => {
@@ -226,12 +256,76 @@ export default function App() {
   }, [catalog, materialSearchQuery]);
   const pendingMaterials = useMemo(() => catalog.filter((material) => material.pendingSync), [catalog]);
   const topMaterials = useMemo(() => [...result.materials].sort((a, b) => b.emission - a.emission), [result]);
+  const rankedComparisonSites = useMemo(
+    () => [...comparisonSites].sort(sortComparisonSitesByEmission),
+    [comparisonSites],
+  );
+  const comparedSites = useMemo(
+    () => rankedComparisonSites.filter((site) => typeof site.latestTotalCo2 === 'number'),
+    [rankedComparisonSites],
+  );
+  const averageComparedEmission = useMemo(() => {
+    if (comparedSites.length === 0) {
+      return null;
+    }
+
+    const total = comparedSites.reduce((sum, site) => sum + (site.latestTotalCo2 ?? 0), 0);
+    return total / comparedSites.length;
+  }, [comparedSites]);
+  const topComparedSite = comparedSites[0] ?? null;
 
   const hasErrors =
     !draft.siteName.trim() ||
     !draft.city.trim() ||
     draft.employees < 1 ||
     draft.materials.some((material) => !material.materialId || material.quantity <= 0);
+
+  const handleAuthenticate = async () => {
+    setAuthError(null);
+
+    const normalizedMail = authMail.trim();
+    const normalizedPassword = authPassword.trim();
+    const normalizedSocietyName = authSocietyName.trim();
+
+    if (!normalizedMail || !normalizedPassword || (isRegisterMode && !normalizedSocietyName)) {
+      setAuthError('Renseignez tous les champs obligatoires.');
+      return;
+    }
+
+    if (normalizedPassword.length < 8) {
+      setAuthError('Le mot de passe doit contenir au moins 8 caracteres.');
+      return;
+    }
+
+    setIsAuthenticating(true);
+
+    try {
+      const session = isRegisterMode
+        ? await registerUser(normalizedMail, normalizedPassword, normalizedSocietyName)
+        : await loginUser(normalizedMail, normalizedPassword);
+
+      setAuthSession(session);
+      setAuthPassword('');
+      setAuthSocietyName('');
+      setAuthError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur inconnue';
+      setAuthError(message);
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleLogout = () => {
+    logoutUser();
+    setAuthSession(null);
+    setAuthPassword('');
+    setAuthSocietyName('');
+    setAuthError(null);
+    setPage('home');
+    setShowHistory(false);
+    setShowSettings(false);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -299,6 +393,38 @@ export default function App() {
     if (isOnline) {
       void refreshMaterials(false);
     }
+  };
+
+  const loadComparison = async (showLoader = true) => {
+    setComparisonError(null);
+
+    if (showLoader) {
+      setComparisonFeedback(null);
+      setIsComparisonLoading(true);
+    }
+
+    try {
+      const sites = await getSiteComparisons();
+      setComparisonSites(sites);
+
+      if (showLoader) {
+        setComparisonFeedback(
+          sites.length > 0 ? `${sites.length} sites recuperes pour comparaison.` : 'Aucun site compare.',
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur inconnue';
+      setComparisonError(`Impossible de charger la comparaison. Detail : ${message}`);
+    } finally {
+      if (showLoader) {
+        setIsComparisonLoading(false);
+      }
+    }
+  };
+
+  const openComparison = () => {
+    setPage('comparison');
+    void loadComparison();
   };
 
   const handleSyncMaterials = async () => {
@@ -627,17 +753,27 @@ export default function App() {
 
     try {
       const loadedBilan = await getBilanById(bilan.id);
-      const siteName = bilan.site?.name?.trim() || loadedBilan.site?.name?.trim() || '';
-      const city = bilan.site?.city?.trim() || loadedBilan.site?.city?.trim() || '';
+      const sourceSite = loadedBilan.site ?? bilan.site;
+      const siteName = sourceSite?.name?.trim() || '';
+      const city = sourceSite?.city?.trim() || '';
       const nextDraft: SiteInputPayload = {
         siteName,
         city,
         energyMwh:
           typeof loadedBilan.electricityKwhYear === 'number' ? loadedBilan.electricityKwhYear / 1000 : 0,
         gasMwh: typeof loadedBilan.gasKwhYear === 'number' ? loadedBilan.gasKwhYear / 1000 : 0,
-        employees: 0,
-        parkingSpaces: 0,
-        computers: 0,
+        employees:
+          typeof sourceSite?.numberEmployee === 'number' && Number.isFinite(sourceSite.numberEmployee)
+            ? sourceSite.numberEmployee
+            : 0,
+        parkingSpaces:
+          typeof sourceSite?.parkingPlaces === 'number' && Number.isFinite(sourceSite.parkingPlaces)
+            ? sourceSite.parkingPlaces
+            : 0,
+        computers:
+          typeof sourceSite?.numberPc === 'number' && Number.isFinite(sourceSite.numberPc)
+            ? sourceSite.numberPc
+            : 0,
         materials: [],
       };
 
@@ -651,7 +787,7 @@ export default function App() {
       setHistoryFeedback(null);
       setSaveError(null);
       setSaveFeedback(
-        `Bilan charge depuis l'API du ${formatHistoryDate(loadedBilan.calculationDate)}. Completez les champs manquants pour recalculer le detail.`,
+        `Bilan charge depuis l'API du ${formatHistoryDate(loadedBilan.calculationDate)}. Les donnees de consommation et du site disponibles ont ete pre-remplies.`,
       );
 
       requestAnimationFrame(() => {
@@ -696,14 +832,6 @@ export default function App() {
     setSaveError(null);
 
     try {
-      let currentSocietyId = societyId;
-
-      if (!currentSocietyId) {
-        const society = await createSociety();
-        currentSocietyId = society.id;
-        setSocietyId(society.id);
-      }
-
       const saved = await saveCalculation(
         {
           siteName: payload.siteName,
@@ -715,7 +843,6 @@ export default function App() {
           gasMwh: payload.gasMwh,
           totalCo2: result.totalEmission,
         },
-        currentSocietyId,
       );
 
       setSaveFeedback(`Calcul sauvegardé le ${saved.calculationDate}.`);
@@ -788,6 +915,146 @@ export default function App() {
     },
   ];
 
+  const resolveComparisonTotal = (site: ApiSiteComparisonResponse) => {
+    if (typeof site.latestTotalCo2 !== 'number' || !Number.isFinite(site.latestTotalCo2)) {
+      return 'Aucun bilan';
+    }
+
+    return formatEmission(site.latestTotalCo2);
+  };
+
+  const resolveComparisonPerEmployee = (site: ApiSiteComparisonResponse) => {
+    if (
+      typeof site.latestTotalCo2 !== 'number' ||
+      !Number.isFinite(site.latestTotalCo2) ||
+      typeof site.numberEmployee !== 'number' ||
+      site.numberEmployee <= 0
+    ) {
+      return 'Indisponible';
+    }
+
+    return `${n2.format(site.latestTotalCo2 / site.numberEmployee)} tCO2e`;
+  };
+
+  const resolveComparisonEnergy = (site: ApiSiteComparisonResponse) => {
+    if (
+      typeof site.latestElectricityKwhYear !== 'number' ||
+      !Number.isFinite(site.latestElectricityKwhYear)
+    ) {
+      return 'Indisponible';
+    }
+
+    return `${n1.format(site.latestElectricityKwhYear / 1000)} MWh/an`;
+  };
+
+  const resolveComparisonDate = (site: ApiSiteComparisonResponse) => {
+    if (!site.latestCalculationDate) {
+      return 'Date inconnue';
+    }
+
+    return formatHistoryDate(site.latestCalculationDate);
+  };
+
+  if (!authSession) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.safe}>
+          <StatusBar style="dark" />
+          <KeyboardAvoidingView
+            style={styles.flex}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          >
+            <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+              <View style={styles.panel}>
+                <Text style={styles.eyebrow}>Authentification JWT</Text>
+                <Text style={styles.title}>{isRegisterMode ? "S'inscrire" : 'Se connecter'}</Text>
+                <Text style={styles.copy}>
+                  {isRegisterMode
+                    ? 'Creez un compte pour votre societe afin de recevoir un token JWT.'
+                    : 'Connectez-vous pour acceder aux APIs protegees Carbonaze.'}
+                </Text>
+
+                <View style={styles.actions}>
+                  <Pressable
+                    style={isRegisterMode ? styles.secondaryButton : styles.primaryButton}
+                    onPress={() => {
+                      setIsRegisterMode(false);
+                      setAuthError(null);
+                    }}
+                  >
+                    <Text style={isRegisterMode ? styles.secondaryButtonText : styles.primaryButtonText}>Connexion</Text>
+                  </Pressable>
+                  <Pressable
+                    style={isRegisterMode ? styles.primaryButton : styles.secondaryButton}
+                    onPress={() => {
+                      setIsRegisterMode(true);
+                      setAuthError(null);
+                    }}
+                  >
+                    <Text style={isRegisterMode ? styles.primaryButtonText : styles.secondaryButtonText}>Inscription</Text>
+                  </Pressable>
+                </View>
+
+                {isRegisterMode ? (
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Societe</Text>
+                    <TextInput
+                      value={authSocietyName}
+                      onChangeText={setAuthSocietyName}
+                      autoCapitalize="words"
+                      placeholder="Nom de votre societe"
+                      style={styles.input}
+                    />
+                  </View>
+                ) : null}
+
+                <View style={styles.field}>
+                  <Text style={styles.label}>Email</Text>
+                  <TextInput
+                    value={authMail}
+                    onChangeText={setAuthMail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    placeholder="vous@entreprise.com"
+                    style={styles.input}
+                  />
+                </View>
+
+                <View style={styles.field}>
+                  <Text style={styles.label}>Mot de passe</Text>
+                  <TextInput
+                    value={authPassword}
+                    onChangeText={setAuthPassword}
+                    secureTextEntry
+                    placeholder="8 caracteres minimum"
+                    style={styles.input}
+                  />
+                </View>
+
+                {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
+
+                <Pressable
+                  style={[styles.primaryButton, isAuthenticating ? styles.disabled : null]}
+                  onPress={() => void handleAuthenticate()}
+                  disabled={isAuthenticating}
+                >
+                  {isAuthenticating ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      {isRegisterMode ? 'Creer mon compte' : 'Se connecter'}
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.safe}>
@@ -795,12 +1062,21 @@ export default function App() {
 
         <View style={styles.header}>
           <Text style={styles.brand}>Carbonaze</Text>
+          <Text style={styles.smallText}>
+            {authSession.mail} - {authSession.societyName}
+          </Text>
           <View style={styles.nav}>
             <Pressable style={[styles.navButton, page === 'home' ? styles.navButtonActive : null]} onPress={() => setPage('home')}>
               <Text style={styles.navButtonText}>Accueil</Text>
             </Pressable>
             <Pressable style={[styles.navButton, page === 'calculator' ? styles.navButtonActive : null]} onPress={openCalculator}>
               <Text style={styles.navButtonText}>Calculateur</Text>
+            </Pressable>
+            <Pressable style={[styles.navButton, page === 'comparison' ? styles.navButtonActive : null]} onPress={openComparison}>
+              <Text style={styles.navButtonText}>Comparaison</Text>
+            </Pressable>
+            <Pressable style={styles.navButton} onPress={handleLogout}>
+              <Text style={styles.navButtonText}>Deconnexion</Text>
             </Pressable>
           </View>
         </View>
@@ -863,7 +1139,7 @@ export default function App() {
               </Text>
             </View>
           </>
-        ) : (
+        ) : page === 'calculator' ? (
             <>
               <View style={styles.panel}>
                 <Text style={styles.eyebrow}>État</Text>
@@ -1033,6 +1309,75 @@ export default function App() {
               ) : null}
 
               <View style={styles.hotbarSpacer} />
+            </>
+          ) : (
+            <>
+              <View style={styles.panel}>
+                <Text style={styles.eyebrow}>Comparaison</Text>
+                <Text style={styles.title}>Sites sauvegardes</Text>
+                <Text style={styles.copy}>
+                  Comparez le dernier bilan disponible pour chaque site enregistre dans la base.
+                </Text>
+
+                <View style={styles.actions}>
+                  <Pressable
+                    style={[styles.secondaryButton, isComparisonLoading ? styles.disabled : null]}
+                    onPress={() => void loadComparison()}
+                    disabled={isComparisonLoading}
+                  >
+                    {isComparisonLoading ? <ActivityIndicator color={COLORS.ink} /> : <Text style={styles.secondaryButtonText}>Actualiser</Text>}
+                  </Pressable>
+                </View>
+
+                {isComparisonLoading ? (
+                  <View style={styles.infoRow}>
+                    <ActivityIndicator color={COLORS.moss} />
+                    <Text style={styles.smallText}>Chargement de la comparaison...</Text>
+                  </View>
+                ) : null}
+                {comparisonFeedback ? <Text style={styles.successText}>{comparisonFeedback}</Text> : null}
+                {comparisonError ? <Text style={styles.errorText}>{comparisonError}</Text> : null}
+              </View>
+
+              <View style={styles.grid}>
+                <Metric label="Sites compares" value={`${comparedSites.length}`} accent={COLORS.moss} />
+                <Metric
+                  label="Moyenne"
+                  value={averageComparedEmission === null ? 'Indisponible' : `${n1.format(averageComparedEmission)} tCO2e`}
+                  accent={COLORS.sand}
+                />
+                <Metric label="Plus emetteur" value={topComparedSite?.name ?? 'Indisponible'} accent={COLORS.ink} />
+              </View>
+
+              <View style={styles.panel}>
+                <Text style={styles.eyebrow}>Classement</Text>
+                <Text style={styles.sectionTitle}>Dernier bilan par site</Text>
+
+                {rankedComparisonSites.map((site) => (
+                  <View key={site.id} style={styles.catalogCard}>
+                    <View style={styles.rowBetween}>
+                      <View style={styles.listMain}>
+                        <Text style={styles.listTitle}>{site.name}</Text>
+                        <Text style={styles.smallText}>
+                          {site.city} - {resolveComparisonDate(site)}
+                        </Text>
+                        <Text style={styles.smallText}>
+                          Employes {site.numberEmployee} | Parking {site.parkingPlaces} | IT {site.numberPc}
+                        </Text>
+                      </View>
+                      <View style={styles.comparisonValueBlock}>
+                        <Text style={styles.listValue}>{resolveComparisonTotal(site)}</Text>
+                        <Text style={styles.smallText}>{resolveComparisonPerEmployee(site)}</Text>
+                        <Text style={styles.smallText}>{resolveComparisonEnergy(site)}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+
+                {rankedComparisonSites.length === 0 && !isComparisonLoading ? (
+                  <Text style={styles.smallText}>Aucun site sauvegarde n'a encore ete trouve.</Text>
+                ) : null}
+              </View>
             </>
           )}
         </ScrollView>
@@ -1395,6 +1740,7 @@ const styles = StyleSheet.create({
   selectValue: { color: COLORS.ink, fontSize: 16, fontWeight: '700' },
   listRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.line },
   listMain: { flex: 1, gap: 2 },
+  comparisonValueBlock: { minWidth: 138, alignItems: 'flex-end', gap: 2 },
   listTitle: { color: COLORS.ink, fontSize: 15, fontWeight: '700' },
   listValue: { color: COLORS.ink, fontSize: 14, fontWeight: '600' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(20,51,45,0.28)', justifyContent: 'center', padding: 16 },
