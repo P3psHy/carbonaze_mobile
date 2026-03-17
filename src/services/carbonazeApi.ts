@@ -99,6 +99,16 @@ export type ApiSiteComparisonResponse = {
 };
 
 let authSession: AuthSession | null = null;
+const siteIdCache = new Map<string, number>();
+
+class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const buildHeaders = (includeJsonContentType = false): Record<string, string> => {
   const headers: Record<string, string> = {
@@ -133,6 +143,44 @@ const resolveErrorMessage = (rawText: string, status: number): string => {
   return rawText;
 };
 
+const normalizeText = (value: string): string => value.trim().toLowerCase();
+
+const toInteger = (value: number): number => Math.round(value);
+
+const buildSiteCacheKey = (payload: SaveCalculationPayload, societyId: number): string => {
+  return JSON.stringify({
+    societyId,
+    siteName: normalizeText(payload.siteName),
+    city: normalizeText(payload.city),
+    numberEmployee: toInteger(payload.employees),
+    parkingPlaces: toInteger(payload.parkingSpaces),
+    numberPc: toInteger(payload.computers),
+  });
+};
+
+const findExistingSite = (
+  sites: ApiSiteComparisonResponse[],
+  payload: SaveCalculationPayload,
+  societyId: number,
+): ApiSiteComparisonResponse | undefined => {
+  const siteName = normalizeText(payload.siteName);
+  const city = normalizeText(payload.city);
+  const numberEmployee = toInteger(payload.employees);
+  const parkingPlaces = toInteger(payload.parkingSpaces);
+  const numberPc = toInteger(payload.computers);
+
+  return sites.find((site) => {
+    return (
+      site.societyId === societyId &&
+      normalizeText(site.name) === siteName &&
+      normalizeText(site.city) === city &&
+      site.numberEmployee === numberEmployee &&
+      site.parkingPlaces === parkingPlaces &&
+      site.numberPc === numberPc
+    );
+  });
+};
+
 const getJson = async <TResponse,>(path: string): Promise<TResponse> => {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: buildHeaders(false),
@@ -140,7 +188,7 @@ const getJson = async <TResponse,>(path: string): Promise<TResponse> => {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(resolveErrorMessage(text, response.status));
+    throw new ApiRequestError(response.status, resolveErrorMessage(text, response.status));
   }
 
   return (await response.json()) as TResponse;
@@ -155,7 +203,7 @@ const postJson = async <TResponse,>(path: string, body: unknown): Promise<TRespo
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(resolveErrorMessage(text, response.status));
+    throw new ApiRequestError(response.status, resolveErrorMessage(text, response.status));
   }
 
   return (await response.json()) as TResponse;
@@ -169,7 +217,50 @@ const deleteRequest = async (path: string): Promise<void> => {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(resolveErrorMessage(text, response.status));
+    throw new ApiRequestError(response.status, resolveErrorMessage(text, response.status));
+  }
+};
+
+const createOrReuseSite = async (
+  payload: SaveCalculationPayload,
+  societyId: number,
+): Promise<SiteResponse> => {
+  const cacheKey = buildSiteCacheKey(payload, societyId);
+  const cachedSiteId = siteIdCache.get(cacheKey);
+
+  if (typeof cachedSiteId === 'number' && Number.isFinite(cachedSiteId)) {
+    return {
+      id: cachedSiteId,
+    };
+  }
+
+  try {
+    const createdSite = await postJson<SiteResponse>('/sites', {
+      name: payload.siteName,
+      city: payload.city,
+      numberEmployee: toInteger(payload.employees),
+      parkingPlaces: toInteger(payload.parkingSpaces),
+      numberPc: toInteger(payload.computers),
+      societyId,
+    });
+    siteIdCache.set(cacheKey, createdSite.id);
+    return createdSite;
+  } catch (error) {
+    if (!(error instanceof ApiRequestError) || (error.status !== 400 && error.status !== 409)) {
+      throw error;
+    }
+
+    const sites = await getSiteComparisons();
+    const existingSite = findExistingSite(sites, payload, societyId);
+
+    if (!existingSite) {
+      throw error;
+    }
+
+    siteIdCache.set(cacheKey, existingSite.id);
+    return {
+      id: existingSite.id,
+    };
   }
 };
 
@@ -177,6 +268,7 @@ export const getAuthSession = (): AuthSession | null => authSession;
 
 export const loginUser = async (mail: string, password: string): Promise<AuthSession> => {
   const session = await postJson<AuthResponse>('/auth/login', { mail, password });
+  siteIdCache.clear();
   authSession = session;
   return session;
 };
@@ -187,12 +279,14 @@ export const registerUser = async (
   societyName: string,
 ): Promise<AuthSession> => {
   const session = await postJson<AuthResponse>('/auth/register', { mail, password, societyName });
+  siteIdCache.clear();
   authSession = session;
   return session;
 };
 
 export const logoutUser = (): void => {
   authSession = null;
+  siteIdCache.clear();
 };
 
 export const getMaterials = async () => {
@@ -229,14 +323,7 @@ export const saveCalculation = async (
     throw new Error('Vous devez etre connecte pour sauvegarder un calcul.');
   }
 
-  const site = await postJson<SiteResponse>('/sites', {
-    name: payload.siteName,
-    city: payload.city,
-    numberEmployee: Math.round(payload.employees),
-    parkingPlaces: Math.round(payload.parkingSpaces),
-    numberPc: Math.round(payload.computers),
-    societyId: resolvedSocietyId,
-  });
+  const site = await createOrReuseSite(payload, resolvedSocietyId);
 
   const bilan = await postJson<BilanResponse>(`/sites/${site.id}/bilans`, {
     electricityKwhYear: payload.energyMwh * 1000,

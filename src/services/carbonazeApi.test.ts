@@ -302,6 +302,85 @@ describe('carbonazeApi', () => {
     });
   });
 
+  it('reuses an existing site when creation returns conflict', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          token: 'jwt-token',
+          userId: 7,
+          mail: 'demo@carbonaze.fr',
+          societyId: 42,
+          societyName: 'Carbonaze Mobile',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        text: async () => JSON.stringify({ message: 'Site deja existant.' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            id: 12,
+            name: 'Site Paris',
+            city: 'Paris',
+            numberEmployee: 13,
+            parkingPlaces: 7,
+            numberPc: 19,
+            createdAt: '2026-03-16T09:00:00',
+            societyId: 42,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 90, siteId: 12, calculationDate: '2026-03-16' }),
+      });
+
+    await loginUser('demo@carbonaze.fr', 'password123');
+    await expect(
+      saveCalculation({
+        siteName: 'Site Paris',
+        city: 'Paris',
+        employees: 12.8,
+        parkingSpaces: 7.2,
+        computers: 18.5,
+        energyMwh: 12.4,
+        gasMwh: 7.5,
+        totalCo2: 22.7,
+        materials: [{ name: 'Acier', quantity: 2, factor: 1.9, emission: 3.8 }],
+      }),
+    ).resolves.toEqual({
+      siteId: 12,
+      bilanId: 90,
+      calculationDate: '2026-03-16',
+    });
+
+    expect(mockFetch).toHaveBeenNthCalledWith(3, `${environment.apiUrl}/sites/comparison`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer jwt-token',
+      },
+    });
+    expect(mockFetch).toHaveBeenNthCalledWith(4, `${environment.apiUrl}/sites/12/bilans`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer jwt-token',
+      },
+      body: JSON.stringify({
+        electricityKwhYear: 12400,
+        gasKwhYear: 7500,
+        totalCo2: 22.7,
+        calculationDate: '2026-03-16',
+        materials: [{ name: 'Acier', quantity: 2, factor: 1.9, emission: 3.8 }],
+      }),
+    });
+  });
+
   it('surfaces the backend response text on failure', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
