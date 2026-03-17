@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://localhost:8080/api';
+import { environment } from '../environment/environment';
+
+const API_BASE_URL = environment.apiUrl;
 const DEFAULT_SOCIETY_NAME = 'Carbonaze Mobile';
 
 export type SaveCalculationPayload = {
@@ -10,6 +12,20 @@ export type SaveCalculationPayload = {
   energyMwh: number;
   gasMwh: number;
   totalCo2: number;
+};
+
+export type ApiMaterialResponse = {
+  id: number;
+  name: string;
+  energeticValue: number;
+  quantity: number;
+};
+
+export type SaveMaterialPayload = {
+  id?: number;
+  name: string;
+  energeticValue: number;
+  quantity: number;
 };
 
 type SocietyResponse = {
@@ -25,6 +41,35 @@ type BilanResponse = {
   id: number;
   siteId: number;
   calculationDate: string;
+};
+
+export type ApiBilanResponse = {
+  id: number;
+  siteId?: number;
+  calculationDate?: string;
+  totalCo2?: number;
+  electricityKwhYear?: number;
+  gasKwhYear?: number;
+  site?: {
+    id?: number;
+    name?: string;
+    city?: string;
+  };
+};
+
+const getJson = async <TResponse,>(path: string): Promise<TResponse> => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as TResponse;
 };
 
 const postJson = async <TResponse,>(path: string, body: unknown): Promise<TResponse> => {
@@ -43,6 +88,40 @@ const postJson = async <TResponse,>(path: string, body: unknown): Promise<TRespo
   }
 
   return (await response.json()) as TResponse;
+};
+
+const deleteRequest = async (path: string): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+};
+
+export const getMaterials = async () => {
+  return getJson<ApiMaterialResponse[]>('/materials');
+};
+
+export const getBilans = async () => {
+  return getJson<ApiBilanResponse[]>('/bilans');
+};
+
+export const getBilanById = async (bilanId: number) => {
+  return getJson<ApiBilanResponse>(`/bilans/${bilanId}`);
+};
+
+export const deleteBilan = async (bilanId: number) => {
+  return deleteRequest(`/bilans/${bilanId}`);
+};
+
+export const saveMaterials = async (payload: SaveMaterialPayload[]) => {
+  return postJson<ApiMaterialResponse[]>('/materials', payload);
 };
 
 export const createSociety = async (name = DEFAULT_SOCIETY_NAME) => {
