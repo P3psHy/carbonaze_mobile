@@ -259,6 +259,9 @@ describe('carbonazeApi', () => {
         energyMwh: 12.4,
         gasMwh: 7.5,
         totalCo2: 22.7,
+        materials: [
+          { name: 'Acier', quantity: 2, factor: 1.9, emission: 3.8 },
+        ],
       }),
     ).resolves.toEqual({
       siteId: 12,
@@ -294,6 +297,7 @@ describe('carbonazeApi', () => {
         gasKwhYear: 7500,
         totalCo2: 22.7,
         calculationDate: '2026-03-16',
+        materials: [{ name: 'Acier', quantity: 2, factor: 1.9, emission: 3.8 }],
       }),
     });
   });

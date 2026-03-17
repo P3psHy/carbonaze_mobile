@@ -11,6 +11,15 @@ export type SaveCalculationPayload = {
   energyMwh: number;
   gasMwh: number;
   totalCo2: number;
+  materials: SaveCalculationMaterialPayload[];
+};
+
+export type SaveCalculationMaterialPayload = {
+  materialId?: number;
+  name: string;
+  quantity: number;
+  factor: number;
+  emission: number;
 };
 
 export type ApiMaterialResponse = {
@@ -54,6 +63,14 @@ export type ApiBilanResponse = {
   totalCo2?: number;
   electricityKwhYear?: number;
   gasKwhYear?: number;
+  materials?: {
+    id?: number;
+    materialId?: number;
+    name?: string;
+    quantity?: number;
+    factor?: number;
+    emission?: number;
+  }[];
   site?: {
     id?: number;
     name?: string;
@@ -226,6 +243,13 @@ export const saveCalculation = async (
     gasKwhYear: payload.gasMwh * 1000,
     totalCo2: payload.totalCo2,
     calculationDate: new Date().toISOString().slice(0, 10),
+    materials: payload.materials.map((material) => ({
+      materialId: material.materialId,
+      name: material.name.trim(),
+      quantity: Number(material.quantity.toFixed(2)),
+      factor: Number(material.factor.toFixed(2)),
+      emission: Number(material.emission.toFixed(1)),
+    })),
   });
 
   return {

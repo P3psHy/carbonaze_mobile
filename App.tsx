@@ -80,8 +80,8 @@ const createLocalId = (prefix: string) => {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 };
 
-const normalizeName = (value: string) => {
-  return value
+const normalizeName = (value?: string | null) => {
+  return (value ?? '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
@@ -756,6 +756,36 @@ export default function App() {
       const sourceSite = loadedBilan.site ?? bilan.site;
       const siteName = sourceSite?.name?.trim() || '';
       const city = sourceSite?.city?.trim() || '';
+      const loadedMaterials = Array.isArray(loadedBilan.materials) ? loadedBilan.materials : [];
+      const nextMaterials = loadedMaterials.reduce<SiteMaterialInput[]>((materials, material) => {
+        const quantity =
+          typeof material.quantity === 'number' && Number.isFinite(material.quantity)
+            ? material.quantity
+            : 0;
+
+        if (!material.name || quantity <= 0) {
+          return materials;
+        }
+
+        const configuredMaterial =
+          (typeof material.materialId === 'number'
+            ? catalog.find((candidate) => candidate.backendId === material.materialId)
+            : undefined) ??
+          catalog.find((candidate) => normalizeName(candidate.name) === normalizeName(material.name));
+
+        if (!configuredMaterial) {
+          return materials;
+        }
+
+        materials.push({
+          id: createLocalId('site-material'),
+          materialId: configuredMaterial.id,
+          name: configuredMaterial.name,
+          quantity,
+        });
+
+        return materials;
+      }, []);
       const nextDraft: SiteInputPayload = {
         siteName,
         city,
@@ -774,7 +804,7 @@ export default function App() {
           typeof sourceSite?.numberPc === 'number' && Number.isFinite(sourceSite.numberPc)
             ? sourceSite.numberPc
             : 0,
-        materials: [],
+        materials: nextMaterials.length > 0 ? nextMaterials : [buildMaterialRow(catalog)],
       };
 
       setDraft(nextDraft);
@@ -832,6 +862,20 @@ export default function App() {
     setSaveError(null);
 
     try {
+      const materialsPayload = result.materials.map((material) => {
+        const catalogMaterial = catalog.find(
+          (candidate) => normalizeName(candidate.name) === normalizeName(material.name),
+        );
+
+        return {
+          materialId: catalogMaterial?.backendId,
+          name: material.name,
+          quantity: material.quantity,
+          factor: material.factor,
+          emission: material.emission,
+        };
+      });
+
       const saved = await saveCalculation(
         {
           siteName: payload.siteName,
@@ -842,6 +886,7 @@ export default function App() {
           energyMwh: payload.energyMwh,
           gasMwh: payload.gasMwh,
           totalCo2: result.totalEmission,
+          materials: materialsPayload,
         },
       );
 
